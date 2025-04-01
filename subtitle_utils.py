@@ -133,34 +133,25 @@ def embed_subtitles(video_path, srt_path, output_dir, format_type):
         st.info(f"SRT path: {srt_path}")
         st.info(f"Output path: {output_path}")
         
-        # Prepare paths for FFmpeg - convert to forward slashes for consistent behavior across platforms
-        safe_video_path = video_path.replace('\\', '/')
-        safe_srt_path = srt_path.replace('\\', '/')
-        
-        # Write a temporary script file to handle path issues
-        # This avoids problems with special characters in paths
-        script_content = f"""
-        file '{safe_video_path.replace("'", "'\\''")}' 
-        """
-        script_path = os.path.join(output_dir, "subtitle_script.txt")
-        with open(script_path, 'w') as f:
-            f.write(script_content)
-        
-        # Platform-independent approach
+        # On Windows, we need a completely different approach - direct burn-in
         if os.name == 'nt':  # Windows
-            # Use the hardburn approach with safe paths
+            # For Windows, use direct burn-in with ASS filter instead
+            # This is more reliable than subtitles filter on Windows
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
-                "-vf", f"subtitles={safe_srt_path}",  # Using forward slashes
+                "-filter_complex", f"[0:v]subtitles='{srt_path}':force_style='FontSize=24,BackColour=&H80000000,BorderStyle=4'[v]",
+                "-map", "[v]",
+                "-map", "0:a",
                 "-c:a", "copy",
                 output_path
             ]
-        else:  # Linux/Mac
+        else:
+            # For Linux/Mac
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
-                "-vf", f"subtitles={safe_srt_path}:force_style='FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3'",
+                "-vf", f"subtitles={srt_path}",
                 "-c:a", "copy",
                 output_path
             ]
@@ -173,45 +164,74 @@ def embed_subtitles(video_path, srt_path, output_dir, format_type):
                                text=True, errors='replace')
         stdout, stderr = process.communicate()
         
-        # If the first method fails, try method 2 with temporary files
+        # If first approach fails, try with the simplest possible approach
         if process.returncode != 0:
             st.warning("First embedding method failed, trying alternative approach...")
             
-            # Create temporary files with simple names
-            temp_video = os.path.join(output_dir, "temp_video.mp4")
-            temp_srt = os.path.join(output_dir, "temp_subs.srt")
-            temp_output = os.path.join(output_dir, "temp_output.mp4")
+            # Create temporary files with extremely simple names
+            temp_dir = os.path.join(output_dir, "temp")
+            os.makedirs(temp_dir, exist_ok=True)
             
-            # Copy the files to simpler names
             import shutil
+            temp_video = os.path.join(temp_dir, "input.mp4")
+            temp_srt = os.path.join(temp_dir, "subs.srt")
+            temp_output = os.path.join(temp_dir, "output.mp4")
+            
+            # Copy files
             shutil.copy2(video_path, temp_video)
             shutil.copy2(srt_path, temp_srt)
             
-            # Convert to safe paths for FFmpeg
-            safe_temp_video = temp_video.replace('\\', '/')
-            safe_temp_srt = temp_srt.replace('\\', '/')
-            
-            # Try the command with simple filenames and safe paths
-            cmd2 = [
-                "ffmpeg", "-y",
-                "-i", temp_video,
-                "-vf", f"subtitles={safe_temp_srt}",
-                "-c:a", "copy",
-                temp_output
-            ]
-            
-            st.info(f"Trying alternative command: {' '.join(cmd2)}")
-            
-            process = subprocess.Popen(cmd2, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
-                                   text=True, errors='replace')
-            stdout, stderr = process.communicate()
-            
-            # If successful, copy the output file back
-            if process.returncode == 0 and os.path.exists(temp_output):
-                shutil.copy2(temp_output, output_path)
+            if os.name == 'nt':  # Windows
+                # Use a hardcoded subtitle burn method that works on Windows
+                cmd2 = [
+                    "ffmpeg", "-y",
+                    "-i", temp_video,
+                    "-c:v", "libx264",
+                    "-crf", "23",
+                    "-preset", "fast",
+                    "-vf", "subtitles=subs.srt",  # Use just the file name, not full path
+                    "-c:a", "copy",
+                    temp_output
+                ]
+                
+                # Change working directory to temp_dir for command execution
+                current_dir = os.getcwd()
+                os.chdir(temp_dir)
+                
+                st.info(f"Running command in directory: {os.getcwd()}")
+                st.info(f"Trying alternative command: {' '.join(cmd2)}")
+                
+                try:
+                    process = subprocess.Popen(cmd2, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                           text=True, errors='replace')
+                    stdout, stderr = process.communicate()
+                finally:
+                    os.chdir(current_dir)  # Restore original directory
+                
+                if process.returncode == 0 and os.path.exists(temp_output):
+                    shutil.copy2(temp_output, output_path)
+                else:
+                    st.error(f"Alternative method failed: {stderr}")
+                    return None
             else:
-                st.error(f"Alternative method also failed: {stderr}")
-                return None
+                # For non-Windows platforms
+                cmd2 = [
+                    "ffmpeg", "-y",
+                    "-i", temp_video,
+                    "-vf", f"subtitles={temp_srt}",
+                    "-c:a", "copy",
+                    temp_output
+                ]
+                
+                process = subprocess.Popen(cmd2, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                       text=True, errors='replace')
+                stdout, stderr = process.communicate()
+                
+                if process.returncode == 0 and os.path.exists(temp_output):
+                    shutil.copy2(temp_output, output_path)
+                else:
+                    st.error(f"Alternative method also failed: {stderr}")
+                    return None
         
         # Verify the output file exists
         if not os.path.exists(output_path):

@@ -20,7 +20,7 @@ YouClip is a beautiful Streamlit application that allows users to create custom 
 - Python 3.7 or higher
 - FFmpeg installed on your system
 
-### Setup
+### Setup 
 
 1. Clone this repository:
    ```

@@ -1,20 +1,43 @@
 import streamlit as st
-from youtube_utils import get_video_info, download_video
-from ffmpeg_utils import clip_video, format_time
-from ui_components import apply_styling, render_sidebar, render_footer
-import tempfile
-import os
-import re
-import time
-import base64
 
-# Set page configuration
+# Set page configuration - MUST be the first Streamlit command
 st.set_page_config(
     page_title="YouClip - YouTube Video Clipper",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Import subtitle utils at the beginning to make them available everywhere
+from youtube_utils import get_video_info, download_video
+from ffmpeg_utils import clip_video, format_time
+from ui_components import apply_styling, render_sidebar, render_footer
+from subtitle_utils import extract_audio, create_srt_file, embed_subtitles, transcribe_audio
+import tempfile
+import os
+import re
+import time
+import base64
+
+# Initialize session state variables
+if 'clip_path' not in st.session_state:
+    st.session_state.clip_path = None
+if 'clip_filename' not in st.session_state:
+    st.session_state.clip_filename = None
+if 'clip_temp_dir' not in st.session_state:
+    st.session_state.clip_temp_dir = None
+if 'clip_format' not in st.session_state:
+    st.session_state.clip_format = None
+if 'selected_format' not in st.session_state:
+    st.session_state.selected_format = "MP4"
+if 'subtitle_generated' not in st.session_state:
+    st.session_state.subtitle_generated = False
+if 'srt_path' not in st.session_state:
+    st.session_state.srt_path = None
+if 'processing_subtitles' not in st.session_state:
+    st.session_state.processing_subtitles = False
+if 'subtitled_video_path' not in st.session_state:
+    st.session_state.subtitled_video_path = None
 
 # Apply custom styling
 apply_styling()
@@ -49,6 +72,135 @@ if url:
         with st.spinner("Fetching video information..."):
             video_info = get_video_info(url)
 st.markdown('</div>', unsafe_allow_html=True)
+
+# Always show the subtitle UI if a clip has been generated previously
+if st.session_state.clip_path and os.path.exists(st.session_state.clip_path):
+    # Main clip container
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.write("## Your Clip")
+    
+    # Determine which video to show: subtitled version if available, otherwise the original clip
+    display_video_path = st.session_state.subtitled_video_path if (
+        st.session_state.subtitled_video_path and 
+        os.path.exists(st.session_state.subtitled_video_path)
+    ) else st.session_state.clip_path
+    
+    # Display video in a container
+    video_container = st.empty()
+    with video_container:
+        file_size = os.path.getsize(display_video_path) / (1024 * 1024)  # MB
+        if file_size < 50:  # Only show preview for files < 50MB
+            st.markdown('<div class="video-container">', unsafe_allow_html=True)
+            st.video(display_video_path)
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("Preview not available for large clips. Please download the file to view.")
+    
+    # Download buttons - show both if subtitled version exists
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(
+            get_download_link(
+                st.session_state.clip_path, 
+                st.session_state.clip_filename, 
+                f"Download Original Clip"
+            ),
+            unsafe_allow_html=True
+        )
+    
+    if st.session_state.subtitled_video_path and os.path.exists(st.session_state.subtitled_video_path):
+        with col2:
+            subtitle_language = "English" if 'subtitle_language' not in st.session_state else st.session_state.subtitle_language
+            subtitle_filename = os.path.basename(st.session_state.subtitled_video_path)
+            st.markdown(
+                get_download_link(
+                    st.session_state.subtitled_video_path, 
+                    subtitle_filename, 
+                    f"Download Clip with {subtitle_language} Subtitles"
+                ),
+                unsafe_allow_html=True
+            )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Subtitle UI in a separate card
+    st.markdown('<div class="card subtitle-card">', unsafe_allow_html=True)
+    st.write("## Add AI-Generated Subtitles")
+    st.write("Enhance your clip with automatically generated subtitles.")
+    
+    # Subtitle language selection
+    subtitle_language = st.selectbox(
+        "Subtitle Language:",
+        options=["English", "Spanish"],
+        index=0,  # Default to English
+        key="subtitle_language"
+    )
+    
+    # Handle subtitle generation
+    if st.button("Generate Subtitles", key="generate_subtitles"):
+        st.session_state.processing_subtitles = True
+    
+    # Process subtitles if button was clicked
+    if st.session_state.processing_subtitles and not st.session_state.subtitle_generated:
+        with st.spinner("Processing subtitles..."):
+            # Step 1: Extract audio from video
+            st.info("Extracting audio from video...")
+            audio_path = extract_audio(st.session_state.clip_path, st.session_state.clip_temp_dir)
+            
+            if audio_path:
+                # Step 2: Transcribe audio (mock for now)
+                st.info("Transcribing audio (mock for now)...")
+                lang_code = "en" if subtitle_language == "English" else "es"
+                transcription = transcribe_audio(audio_path, language=lang_code)
+                
+                # Step 3: Create SRT file
+                st.info("Creating subtitle file...")
+                base_filename = os.path.splitext(os.path.basename(st.session_state.clip_path))[0]
+                srt_path = create_srt_file(transcription, st.session_state.clip_temp_dir, base_filename)
+                
+                if srt_path:
+                    st.session_state.srt_path = srt_path
+                    st.session_state.subtitle_generated = True
+                    st.rerun()  # Force rerun to update UI
+            else:
+                st.error("Failed to extract audio from video.")
+                st.session_state.processing_subtitles = False
+    
+    # Display subtitle results if generated
+    if st.session_state.subtitle_generated and st.session_state.srt_path:
+        # Offer SRT file download
+        srt_filename = os.path.basename(st.session_state.srt_path)
+        st.success("Subtitles generated successfully!")
+        
+        with open(st.session_state.srt_path, "r", encoding="utf-8") as f:
+            srt_content = f.read()
+        
+        with st.expander("View subtitle text"):
+            st.text_area("Generated subtitles:", srt_content, height=150)
+            st.markdown(
+                get_download_link(st.session_state.srt_path, srt_filename, "Download SRT Subtitle File"),
+                unsafe_allow_html=True
+            )
+        
+        # Step 4: Offer to embed subtitles in video
+        if st.button("Embed Subtitles in Video", key="embed_subtitles"):
+            with st.spinner("Embedding subtitles in video..."):
+                subtitle_video_path = embed_subtitles(
+                    st.session_state.clip_path, 
+                    st.session_state.srt_path,
+                    st.session_state.clip_temp_dir,
+                    st.session_state.clip_format
+                )
+                
+                if subtitle_video_path:
+                    st.session_state.subtitled_video_path = subtitle_video_path
+                    st.success("Subtitles embedded successfully!")
+                    st.rerun()  # Force rerun to update UI
+                else:
+                    st.error("Failed to embed subtitles. Please check the logs.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Display video information and clipping options if video info is available
 if video_info:
@@ -105,10 +257,6 @@ if video_info:
         
     # Format and quality selection
     st.write("### Choose Format and Quality")
-    
-    # Initialize session state for format selection
-    if 'selected_format' not in st.session_state:
-        st.session_state.selected_format = "MP4"
     
     # Format selection with custom cards
     st.markdown("<p>Select video format:</p>", unsafe_allow_html=True)
@@ -194,20 +342,20 @@ if video_info:
                     if success:
                         st.success("Clip generated successfully!")
                         
-                        # Display download button
-                        st.markdown(
-                            get_download_link(output_path, output_filename, f"Download {st.session_state.selected_format} ({quality} Quality)"),
-                            unsafe_allow_html=True
-                        )
+                        # Save the clip path in session state for later use with subtitles
+                        st.session_state.clip_path = output_path
+                        st.session_state.clip_filename = output_filename
+                        st.session_state.clip_temp_dir = temp_dir
+                        st.session_state.clip_format = st.session_state.selected_format
                         
-                        # Display preview if it's small enough
-                        file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
-                        if file_size < 50:  # Only show preview for files < 50MB
-                            st.markdown('<div class="video-container">', unsafe_allow_html=True)
-                            st.video(output_path)
-                            st.markdown('</div>', unsafe_allow_html=True)
-                        else:
-                            st.info("Preview not available for large clips. Please download the file to view.")
+                        # Reset subtitle related states when a new clip is generated
+                        st.session_state.subtitle_generated = False
+                        st.session_state.processing_subtitles = False
+                        st.session_state.srt_path = None
+                        st.session_state.subtitled_video_path = None
+                        
+                        # Force a rerun to show the subtitle UI section
+                        st.rerun()
                     else:
                         st.error("Failed to generate clip. Please try again.")
             

@@ -1,5 +1,7 @@
 import streamlit as st
 
+# IMPORTANT: Do NOT include st.set_page_config() here, it must only be in the main app.py
+
 def apply_styling():
     """Apply custom CSS styling to the app."""
     st.markdown("""
@@ -221,6 +223,21 @@ def apply_styling():
         /* Hide excessive debug output */
         .stDebug {
             display: none;
+        }
+        
+        /* Subtitle card styling */
+        .subtitle-card {
+            margin-top: 30px;
+            border-top: 2px solid rgba(255, 0, 0, 0.2);
+            background-color: rgba(45, 45, 45, 0.9);
+        }
+        
+        /* Subtitle preview */
+        .stTextArea > div > div > textarea {
+            background-color: #1a1a1a;
+            color: white;
+            font-family: monospace;
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
     </style>
     """, unsafe_allow_html=True)

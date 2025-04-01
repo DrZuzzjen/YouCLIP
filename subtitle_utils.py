@@ -133,22 +133,26 @@ def embed_subtitles(video_path, srt_path, output_dir, format_type):
         st.info(f"SRT path: {srt_path}")
         st.info(f"Output path: {output_path}")
         
+        # Prepare paths for FFmpeg - convert to forward slashes for consistent behavior across platforms
+        safe_video_path = video_path.replace('\\', '/')
+        safe_srt_path = srt_path.replace('\\', '/')
+        
         # Write a temporary script file to handle path issues
         # This avoids problems with special characters in paths
         script_content = f"""
-        file '{video_path.replace("'", "'\\''")}' 
+        file '{safe_video_path.replace("'", "'\\''")}' 
         """
         script_path = os.path.join(output_dir, "subtitle_script.txt")
         with open(script_path, 'w') as f:
             f.write(script_content)
         
-        # Method 1: Try with different approach for Windows to handle the paths
+        # Platform-independent approach
         if os.name == 'nt':  # Windows
-            # Use the hardburn approach
+            # Use the hardburn approach with safe paths
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
-                "-vf", f"subtitles='{srt_path.replace('\\', '/').replace(':', '\\:')}'",
+                "-vf", f"subtitles={safe_srt_path}",  # Using forward slashes
                 "-c:a", "copy",
                 output_path
             ]
@@ -156,7 +160,7 @@ def embed_subtitles(video_path, srt_path, output_dir, format_type):
             cmd = [
                 "ffmpeg", "-y",
                 "-i", video_path,
-                "-vf", f"subtitles={srt_path}:force_style='FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3'",
+                "-vf", f"subtitles={safe_srt_path}:force_style='FontSize=24,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3'",
                 "-c:a", "copy",
                 output_path
             ]
@@ -183,11 +187,15 @@ def embed_subtitles(video_path, srt_path, output_dir, format_type):
             shutil.copy2(video_path, temp_video)
             shutil.copy2(srt_path, temp_srt)
             
-            # Try the command with simple filenames
+            # Convert to safe paths for FFmpeg
+            safe_temp_video = temp_video.replace('\\', '/')
+            safe_temp_srt = temp_srt.replace('\\', '/')
+            
+            # Try the command with simple filenames and safe paths
             cmd2 = [
                 "ffmpeg", "-y",
                 "-i", temp_video,
-                "-vf", f"subtitles={temp_srt}",
+                "-vf", f"subtitles={safe_temp_srt}",
                 "-c:a", "copy",
                 temp_output
             ]

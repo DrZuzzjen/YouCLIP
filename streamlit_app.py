@@ -44,10 +44,15 @@ if 'srt_path' not in st.session_state:
     st.session_state.srt_path = None
 if 'processing_subtitles' not in st.session_state:
     st.session_state.processing_subtitles = False
+if 'processing_clip' not in st.session_state:
+    st.session_state.processing_clip = False
 if 'subtitled_video_path' not in st.session_state:
     st.session_state.subtitled_video_path = None
 if 'video_info' not in st.session_state:
     st.session_state.video_info = None
+# Add a flag to prevent the infinite loop with rerun
+if 'url_processed' not in st.session_state:
+    st.session_state.url_processed = False
 
 # Apply custom styling
 apply_styling()
@@ -66,20 +71,17 @@ with col1:
     if st.session_state.subtitled_video_path and os.path.exists(st.session_state.subtitled_video_path):
         # Show subtitled video if available
         render_video_preview(
-            video_path=st.session_state.subtitled_video_path, 
-            title="Your Subtitled Clip"
+            video_path=st.session_state.subtitled_video_path
         )
-    elif st.session_state.clip_path and os.path.exists(st.session_state.clip_path):
-        # Show clip if available
+    elif st.session_state.clip_path and os.path.exists(st.session_state.clip_path) and not st.session_state.processing_clip:
+        # Show clip if available and not in processing state
         render_video_preview(
-            video_path=st.session_state.clip_path, 
-            title="Your Clip"
+            video_path=st.session_state.clip_path
         )
     else:
         # Show video info or placeholder
         render_video_preview(
-            video_info=st.session_state.video_info, 
-            title="Video Preview"
+            video_info=st.session_state.video_info
         )
 
 with col2:
@@ -95,24 +97,40 @@ with col2:
             key="youtube_url"
         )
         
+        # Check if URL was entered
         if url:
             # Validate URL
             if not re.match(r'https?://(www\.)?youtube\.com/watch\?v=.+|https?://youtu\.be/.+', url):
                 error_message("Please enter a valid YouTube URL")
+                st.session_state.url_processed = False  # Reset the flag for invalid URLs
             else:
-                with st.spinner("Fetching video information..."):
-                    video_info = get_video_info(url)
-                    if video_info:
-                        st.session_state.video_info = video_info
-                        success_message("Video information retrieved successfully!")
-                        
-                        # Show button to go to next step
-                        if st.session_state.video_info:
-                            # Update tab selection
+                # Check if this URL has already been processed
+                already_processed = st.session_state.url_processed
+                
+                if not already_processed:
+                    with st.spinner("Fetching video information..."):
+                        video_info = get_video_info(url)
+                        if video_info:
+                            # Update session state with new video info
+                            st.session_state.video_info = video_info
+                            st.session_state.url_processed = True
                             st.session_state.current_step = 2
-                            # We need to avoid using st.rerun() here since it would interrupt the flow
-                            # Just display a success message instead
-                            success_message("Please click on the 'Create Clip' tab to continue")
+                            
+                            # After getting video info, display success message
+                            success_message("Video information retrieved successfully!")
+                            info_message("Click on the 'Create Clip' tab to continue")
+                            
+                            # Force a rerun to refresh the UI with the video preview
+                            st.rerun()
+                
+                # If URL was already processed, just show the success messages again
+                elif already_processed and st.session_state.video_info:
+                    success_message("Video information retrieved successfully!")
+                    info_message("Click on the 'Create Clip' tab to continue")
+                    
+        # If URL is cleared or changed, reset the processed flag
+        elif st.session_state.url_processed:
+            st.session_state.url_processed = False
     
     # Tab 2: Create Clip - Set timing, format, quality
     with tabs[1]:
@@ -180,6 +198,9 @@ with col2:
             if valid_time_selection:
                 if st.button("Generate Clip", key="generate_clip_btn", use_container_width=True):
                     try:
+                        # Set processing flag to keep showing the thumbnail during processing
+                        st.session_state.processing_clip = True
+                        
                         with st.spinner("Processing your clip..."):
                             # Create temp directory
                             temp_dir = tempfile.mkdtemp()
@@ -194,6 +215,7 @@ with col2:
                             
                             if not download_path:
                                 error_message("Failed to download video. Please try again.")
+                                st.session_state.processing_clip = False  # Reset processing flag
                                 st.stop()
                             
                             # Update progress
@@ -237,6 +259,9 @@ with col2:
                                 st.session_state.srt_path = None
                                 st.session_state.subtitled_video_path = None
                                 
+                                # Reset processing flag after successful clip generation
+                                st.session_state.processing_clip = False
+                                
                                 # Success message
                                 success_message("Clip generated successfully!")
                                 
@@ -246,9 +271,13 @@ with col2:
                                 # Force rerun to show the clip in the preview area
                                 st.rerun()
                             else:
+                                # Reset processing flag if failed
+                                st.session_state.processing_clip = False
                                 error_message("Failed to generate clip. Please try again.")
                     
                     except Exception as e:
+                        # Reset processing flag on error
+                        st.session_state.processing_clip = False
                         error_message(f"An error occurred: {str(e)}")
         else:
             # Prompt user to first enter a YouTube URL

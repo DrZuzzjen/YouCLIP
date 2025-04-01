@@ -409,10 +409,12 @@ def render_footer():
     </div>
     """, unsafe_allow_html=True)
 
-def render_video_preview(video_info=None, video_path=None, title="Video Preview"):
+def render_video_preview(video_info=None, video_path=None, title=None):
     """Render the video preview area."""
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.write(f"## {title}")
+    # Only show title if explicitly provided
+    if title:
+        st.write(f"## {title}")
     
     if video_path and os.path.exists(video_path):
         # Display video if a path is provided
@@ -430,7 +432,7 @@ def render_video_preview(video_info=None, video_path=None, title="Video Preview"
     elif video_info:
         # Display video thumbnail and info if video_info is provided
         st.markdown('<div class="video-container">', unsafe_allow_html=True)
-        st.image(video_info["thumbnail"], use_column_width=True)
+        st.image(video_info["thumbnail"], use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="video-info">', unsafe_allow_html=True)

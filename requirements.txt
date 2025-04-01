@@ -8,3 +8,4 @@ openai-whisper==20231117
 transformers>=4.30.0
 torch>=2.0.0
 torchaudio>=2.0.0
+ffmpeg-python
